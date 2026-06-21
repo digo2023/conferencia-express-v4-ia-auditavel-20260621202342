@@ -1,0 +1,25 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'org.bymaicon.conferenciaexpressv4'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'org.bymaicon.conferenciaexpressv4'
+        minSdk 26
+        targetSdk 34
+        versionCode 4
+        versionName '4.0.1'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'androidx.documentfile:documentfile:1.0.1'
+}
