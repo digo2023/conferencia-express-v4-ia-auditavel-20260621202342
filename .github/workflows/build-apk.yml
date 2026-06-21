@@ -1,0 +1,68 @@
+name: Build APK Android Nativo - Conferência Express
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar SDK Android
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Instalar Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Conferir estrutura do projeto
+        run: |
+          pwd
+          find . -maxdepth 8 -type f | sort
+          gradle --version
+          java -version
+
+      - name: Compilar APK debug
+        run: |
+          set -o pipefail
+          gradle --no-daemon clean assembleDebug --stacktrace --info 2>&1 | tee gradle_build_full.log
+
+      - name: Listar APK criado
+        if: always()
+        run: find . -name "*.apk" -type f -print
+
+      - name: Enviar APK como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conferencia-Express-APK-Nativo
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Enviar logs se falhar
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-logs
+          path: |
+            gradle_build_full.log
+            **/build/reports/**/*
+          if-no-files-found: ignore
