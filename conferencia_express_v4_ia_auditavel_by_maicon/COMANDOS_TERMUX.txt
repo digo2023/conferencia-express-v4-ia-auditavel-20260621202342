@@ -1,0 +1,22 @@
+cd /storage/emulated/0/Download
+
+rm -rf conferencia_express_v4_ia_auditavel_by_maicon
+
+unzip -o conferencia_express_v4_ia_auditavel_by_maicon.zip -d conferencia_express_v4_ia_auditavel_by_maicon
+
+cd /storage/emulated/0/Download/conferencia_express_v4_ia_auditavel_by_maicon
+
+git config --global --add safe.directory /storage/emulated/0/Download/conferencia_express_v4_ia_auditavel_by_maicon
+
+git init
+git branch -M main
+
+git config --global user.name "Maicon Rodrigo Pimentel"
+git config --global user.email "digomaicon2023@gmail.com"
+
+git add .
+git commit -m "Conferencia Express V4 IA auditavel By Maicon"
+
+REPO="conferencia-express-v4-ia-auditavel-$(date +%Y%m%d%H%M%S)"
+
+gh repo create "$REPO" --public --source=. --remote=origin --push
