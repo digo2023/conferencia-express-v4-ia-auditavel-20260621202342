@@ -31,10 +31,10 @@ public class MainActivity extends Activity {
     LinearLayout lista;
     DatabaseHelper db;
     ArrayList<Item> consumo=new ArrayList<>(), oc=new ArrayList<>(), resultado=new ArrayList<>();
-    final int AZUL=Color.rgb(2,8,24), AZUL2=Color.rgb(0,74,173), OURO=Color.rgb(245,164,0), VERDE=Color.rgb(0,150,95);
+    final int AZUL=Color.rgb(2,8,24), AZUL2=Color.rgb(0,74,173), OURO=Color.rgb(245,164,0);
 
     static class Item{
-        String codigo="", nome="", un="", data="", entrega="", categoria="PERECÍVEL", status="", motivo="", ocNome="";
+        String codigo="", nome="", un="", data="", entrega="", categoria="PERECÍVEL", status="", motivo="", ocNome="", matchTipo="";
         double qtd=0, comprado=0, faltante=0, confianca=0;
         boolean selecionado=true;
         TreeSet<String> datas=new TreeSet<>();
@@ -54,7 +54,7 @@ public class MainActivity extends Activity {
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(28,28,28,38); root.setBackgroundColor(AZUL); sc.addView(root);
         TextView t=txt("CONFERÊNCIA RANCHO",31,Color.WHITE,true); t.setGravity(Gravity.CENTER); root.addView(t);
         TextView sub=txt("EXPRESS • UNIDADE COLORADO",15,OURO,true); sub.setGravity(Gravity.CENTER); root.addView(sub);
-        TextView sub2=txt("Conferência inteligente Analítico x O.C. Rancho",14,Color.LTGRAY,false); sub2.setGravity(Gravity.CENTER); root.addView(sub2);
+        TextView sub2=txt("IA auditável: código + nome + unidade + similaridade segura",13,Color.LTGRAY,false); sub2.setGravity(Gravity.CENTER); root.addView(sub2);
 
         LinearLayout dates=new LinearLayout(this); dates.setOrientation(LinearLayout.HORIZONTAL); dates.setPadding(0,18,0,12); root.addView(dates);
         dataIni=campo("Data inicial"); dataFim=campo("Data final"); dates.addView(dataIni,new LinearLayout.LayoutParams(0,92,1)); dates.addView(dataFim,new LinearLayout.LayoutParams(0,92,1));
@@ -152,7 +152,8 @@ public class MainActivity extends Activity {
         ArrayList<Item> res=new ArrayList<>();
         for(Item c:cons){
             if(!modulo.equals("TOTAL") && !c.categoria.equals(modulo)) continue;
-            Item b=melhorOC(c,ord); c.comprado=b==null?0:b.qtd; c.entrega=b==null?entregaPadrao(ord):b.entrega; c.ocNome=b==null?"":b.nome; c.faltante=Math.max(0,c.qtd-c.comprado); c.confianca=b==null?0:confianca(c,b);
+            Item b=melhorOC(c,ord);
+            c.comprado=b==null?0:b.qtd; c.entrega=b==null?entregaPadrao(ord):b.entrega; c.ocNome=b==null?"":b.nome; c.faltante=Math.max(0,c.qtd-c.comprado); c.confianca=b==null?0:confianca(c,b);
             if(c.faltante>tol(c.un)){ c.status=b==null?"INSUMO NÃO LOCALIZADO NA O.C.":"FALTA PARCIAL"; c.motivo=b==null?"insumo não localizado na oc":"Falta parcial"; c.selecionado=true; res.add(c); }
         }
         Collections.sort(res,(a,b)->{ int x=a.categoria.compareTo(b.categoria); if(x!=0)return x; return a.nome.compareTo(b.nome); });
@@ -160,35 +161,85 @@ public class MainActivity extends Activity {
     }
 
     Item melhorOC(Item c,ArrayList<Item> ord){
-        String eq=db.equivalencia(c.nome); Item melhor=null; double nota=-1;
-        for(Item b:ord){ double n=0;
-            if(!c.un.equals(b.un)) continue;
-            if(c.codigo.equals(b.codigo)) n=1.0;
-            else if(!eq.isEmpty() && norm(eq).equals(norm(b.nome))) n=.99;
-            else if(norm(c.nome).equals(norm(b.nome))) n=.98;
-            else n=scoreSeguro(norm(c.nome),norm(b.nome));
-            if(n>nota){ nota=n; melhor=b; }
+        String eq=db.equivalencia(c.nome); Item melhor=null; double nota=-1; String tipo="";
+        for(Item b:ord){
+            double n=notaConferencia(c,b,eq);
+            if(n>nota){ nota=n; melhor=b; tipo=tipoMatch(c,b,eq,n); }
         }
-        return nota>=.88?melhor:null;
+        if(melhor!=null && nota>=0.90){ c.matchTipo=tipo; return melhor; }
+        return null;
     }
-    double confianca(Item a,Item b){ if(a.codigo.equals(b.codigo))return 1; if(norm(a.nome).equals(norm(b.nome)))return .98; return Math.max(.50,scoreSeguro(norm(a.nome),norm(b.nome))); }
 
-    double scoreSeguro(String a,String b){
-        if(a.equals(b)) return 1;
-        String[] aa=a.split(" "), bb=b.split(" "); LinkedHashSet<String> A=new LinkedHashSet<>(), B=new LinkedHashSet<>();
-        for(String x:aa) if(x.length()>2) A.add(x); for(String x:bb) if(x.length()>2) B.add(x);
-        if(A.isEmpty()||B.isEmpty())return 0; int hit=0; for(String x:A) if(B.contains(x)) hit++;
-        double recall=(double)hit/A.size(); double precision=(double)hit/B.size(); double dice=(2*precision*recall)/(precision+recall+0.0001);
-        if(A.size()<=2 && !B.containsAll(A)) return Math.min(.50,dice);
-        return dice;
+    double notaConferencia(Item a,Item b,String eq){
+        if(!a.un.equals(b.un)) return 0;
+        if(a.codigo.length()>0 && a.codigo.equals(b.codigo)) return 1.0;
+        String an=norm(a.nome), bn=norm(b.nome);
+        if(!eq.isEmpty() && norm(eq).equals(bn)) return 0.995;
+        if(an.equals(bn)) return 0.985;
+        if(conflitoGrave(an,bn)) return 0;
+        if(gramaturaDivergente(an,bn)) return 0;
+        if(categoriaConflitante(a.categoria,b.categoria)) return 0;
+        double dice=scoreDice(an,bn);
+        double ordem=scoreOrdem(an,bn);
+        double cod=prefixoCodigoCompativel(a.codigo,b.codigo)?0.04:0.0;
+        double score=Math.min(0.97,(dice*0.72)+(ordem*0.24)+cod);
+        if(tokensEssenciais(an).size()>=3 && !temTokensEssenciais(an,bn)) score=Math.min(score,0.84);
+        return score;
+    }
+
+    String tipoMatch(Item a,Item b,String eq,double n){
+        if(a.codigo.equals(b.codigo)) return "código exato";
+        if(!eq.isEmpty() && norm(eq).equals(norm(b.nome))) return "equivalência aprendida";
+        if(norm(a.nome).equals(norm(b.nome))) return "nome exato";
+        return "similaridade segura "+Math.round(n*100)+"%";
+    }
+
+    double confianca(Item a,Item b){ return notaConferencia(a,b,db.equivalencia(a.nome)); }
+
+    boolean prefixoCodigoCompativel(String a,String b){
+        if(a==null||b==null) return false; String[] aa=a.split("\\."), bb=b.split("\\.");
+        return aa.length>=3 && bb.length>=3 && aa[0].equals(bb[0]) && aa[1].equals(bb[1]) && aa[2].equals(bb[2]);
+    }
+    boolean categoriaConflitante(String a,String b){
+        if(a.equals(b)) return false;
+        if(a.equals("PERECÍVEL")||b.equals("PERECÍVEL")) return false;
+        if(a.equals("NÃO PERECÍVEIS")||b.equals("NÃO PERECÍVEIS")) return false;
+        return true;
+    }
+    boolean gramaturaDivergente(String a,String b){
+        String ga=gramatura(a), gb=gramatura(b);
+        return !ga.isEmpty() && !gb.isEmpty() && !ga.equals(gb);
+    }
+    String gramatura(String s){ Matcher m=Pattern.compile("\\b(\\d{1,4})\\s*(G|GR|ML)\\b").matcher(s); return m.find()?m.group(1)+m.group(2):""; }
+    boolean conflitoGrave(String a,String b){
+        String[][] grupos={{"COXAO DURO","PATINHO","ACEM","PALETA","MUSCULO","HAMBURGUER"},{"SASSAMI","FILE PEITO","COXA","SOBRECOXA","ASA"},{"CALABRESA","LINGUICA TOSCANA","SALSICHA","BACON"},{"DOCE PACOCA","CREME AMENDOIM","BOLO","PUDIM"}};
+        for(String[] g:grupos){ String ca="", cb=""; for(String x:g){ if(a.contains(x)) ca=x; if(b.contains(x)) cb=x; } if(!ca.isEmpty()&&!cb.isEmpty()&&!ca.equals(cb)) return true; }
+        return false;
+    }
+    boolean temTokensEssenciais(String a,String b){ for(String t:tokensEssenciais(a)) if(!tokensEssenciais(b).contains(t)) return false; return true; }
+    LinkedHashSet<String> tokensEssenciais(String s){
+        LinkedHashSet<String> out=new LinkedHashSet<>();
+        String stop=" DE DA DO DAS DOS PARA COM SEM TIPO KG UN CX PC LT X A O E ";
+        for(String t:s.split(" ")) if(t.length()>2 && !stop.contains(" "+t+" ")) out.add(t);
+        return out;
+    }
+    double scoreDice(String a,String b){
+        LinkedHashSet<String> A=tokensEssenciais(a), B=tokensEssenciais(b); if(A.isEmpty()||B.isEmpty()) return 0;
+        int hit=0; for(String x:A) if(B.contains(x)) hit++;
+        double recall=(double)hit/A.size(); double precision=(double)hit/B.size(); return (2*precision*recall)/(precision+recall+0.0001);
+    }
+    double scoreOrdem(String a,String b){
+        ArrayList<String> A=new ArrayList<>(tokensEssenciais(a)); ArrayList<String> B=new ArrayList<>(tokensEssenciais(b)); if(A.isEmpty()||B.isEmpty())return 0;
+        int seq=0, pos=-1; for(String t:A){ int p=B.indexOf(t); if(p>pos){ seq++; pos=p; } }
+        return (double)seq/A.size();
     }
 
     void montarRevisao(){
         lista.removeAllViews(); int n=1; for(Item c:resultado){ LinearLayout card=new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL); card.setPadding(14,14,14,14); card.setBackgroundColor(Color.rgb(3,22,55)); LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2); lp.setMargins(0,10,0,10); lista.addView(card,lp);
-            CheckBox cb=new CheckBox(this); cb.setTextColor(Color.WHITE); cb.setChecked(c.selecionado); int pos=n++; cb.setText(pos+". ["+c.categoria+"] "+c.nome+"\nNecessário: "+fmt(c.qtd)+" "+c.un+" | O.C.: "+fmt(c.comprado)+" "+c.un+" | Falta: "+fmt(c.faltante)+" "+c.un+"\nConsumo: "+c.data+" | Entrega: "+c.entrega+" | Confiança: "+Math.round(c.confianca*100)+"%\n"+c.motivo); cb.setOnCheckedChangeListener((x,on)->c.selecionado=on); card.addView(cb);
+            CheckBox cb=new CheckBox(this); cb.setTextColor(Color.WHITE); cb.setChecked(c.selecionado); int pos=n++; cb.setText(pos+". ["+c.categoria+"] "+c.nome+"\nNecessário: "+fmt(c.qtd)+" "+c.un+" | O.C.: "+fmt(c.comprado)+" "+c.un+" | Falta: "+fmt(c.faltante)+" "+c.un+"\nConsumo: "+c.data+" | Entrega: "+c.entrega+" | Confiança: "+Math.round(c.confianca*100)+"% | "+c.matchTipo+"\n"+c.motivo); cb.setOnCheckedChangeListener((x,on)->c.selecionado=on); card.addView(cb);
             Button vinc=btn("🔁 Tornar igual item encontrado na O.C."); card.addView(vinc); vinc.setOnClickListener(v->vincular(c));
             Button cor=btn("✏️ Corrigir quantidade O.C."); card.addView(cor); cor.setOnClickListener(v->corrigirQtd(c));
-            Button motivo=btn("🔎 Ver motivo da classificação"); card.addView(motivo); motivo.setOnClickListener(v->dialog("Motivo",c.motivo+"\nItem O.C.: "+c.ocNome));
+            Button motivo=btn("🔎 Ver motivo da classificação"); card.addView(motivo); motivo.setOnClickListener(v->dialog("Motivo",c.motivo+"\nItem O.C.: "+c.ocNome+"\nCritério: "+c.matchTipo+"\nConfiança: "+Math.round(c.confianca*100)+"%"));
         }
     }
     void vincular(Item c){ final EditText e=new EditText(this); e.setHint("Digite exatamente o nome do item encontrado na O.C."); new AlertDialog.Builder(this).setTitle("Tornar igual item da O.C.").setMessage("Item do analítico:\n"+c.nome+"\n\nA IA salvará esta equivalência para as próximas análises.").setView(e).setPositiveButton("Salvar",(d,w)->{String oc=e.getText().toString().trim(); if(!oc.isEmpty()){db.salvarEquivalencia(c.nome,oc.toUpperCase(Locale.ROOT)); toast("Equivalência salva. Rode a conferência novamente para recalcular.");}}).setNegativeButton("Cancelar",null).show(); }
@@ -234,7 +285,7 @@ public class MainActivity extends Activity {
     double num(String s){ try{return Double.parseDouble(s.replace(".","").replace(",","."));}catch(Exception e){return 0;} }
     String fmt(double v){ return String.format(Locale.US,"%.3f",v).replace('.',','); }
     double tol(String u){ return u.equals("UN")?0.9:0.05; }
-    String norm(String s){ String n=Normalizer.normalize(s==null?"":s,Normalizer.Form.NFD).replaceAll("\\p{M}",""); return n.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]+"," ").trim(); }
+    String norm(String s){ String n=Normalizer.normalize(s==null?"":s,Normalizer.Form.NFD).replaceAll("\\p{M}",""); n=n.toUpperCase(Locale.ROOT); n=n.replace("HAMBURGER","HAMBURGUER").replace("BOV ","BOVINA ").replace("BOV.","BOVINA").replace("CXAO","COXAO"); return n.replaceAll("[^A-Z0-9]+"," ").trim(); }
     String limpaNome(String s){ return s.replaceAll("\\s+"," ").trim().toUpperCase(Locale.ROOT); }
     String join(TreeSet<String> s){ StringBuilder b=new StringBuilder(); for(String x:s){ if(b.length()>0)b.append(", "); b.append(x);} return b.toString(); }
     String joinList(ArrayList<String> a){ StringBuilder b=new StringBuilder(); int n=1; for(String x:a)b.append(n++).append(". ").append(x).append("\n"); return b.toString(); }
